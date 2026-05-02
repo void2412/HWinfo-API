@@ -66,7 +66,7 @@ def test_single_temperature_sensor():
     assert len(sensors) == 1
     s = sensors[0]
     assert s.type == "temperature"
-    assert s.name == "CPU Temp"
+    assert s.name == "CPU Temp #0"
     assert s.unit == "C"
     assert s.value == 65.5
 
@@ -74,13 +74,13 @@ def test_single_temperature_sensor():
 def test_name_user_takes_priority_over_name_orig():
     buf = _make_buffer([_make_entry(name_orig="CPU [#0]: Core 0", name_user="CPU Core 0")])
     sensors = parse_buffer(buf)
-    assert sensors[0].name == "CPU Core 0"
+    assert sensors[0].name == "CPU Core 0 #0"
 
 
 def test_falls_back_to_name_orig_when_user_empty():
     buf = _make_buffer([_make_entry(name_orig="CPU Fan", name_user="")])
     sensors = parse_buffer(buf)
-    assert sensors[0].name == "CPU Fan"
+    assert sensors[0].name == "CPU Fan #0"
 
 
 def test_empty_entry_list():

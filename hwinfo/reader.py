@@ -27,6 +27,10 @@ _HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 44
 _ENTRY_FMT = "<III128s128s16sdddd"
 _ENTRY_MEANINGFUL = struct.calcsize(_ENTRY_FMT)  # 316
 
+# Hardware sensor (parent device) layout: id(u32), instance(u32), name_orig[128], name_user[128]
+_SENSOR_FMT = "<II128s128s"
+_SENSOR_MEANINGFUL = struct.calcsize(_SENSOR_FMT)  # 264
+
 
 if sys.platform == "win32":
     import ctypes
@@ -58,8 +62,12 @@ if sys.platform == "win32":
                 return None
 
             vals = struct.unpack(_HEADER_FMT, header_bytes)
+            sensor_off, sensor_size, sensor_count = vals[4], vals[5], vals[6]
             entry_off, entry_size, entry_count = vals[7], vals[8], vals[9]
-            total = entry_off + entry_size * entry_count
+            total = max(
+                sensor_off + sensor_size * sensor_count,
+                entry_off + entry_size * entry_count,
+            )
             # Guard against corrupted/spoofed shared memory with bogus sizes
             if total > 64 * 1024 * 1024 or total < _HEADER_SIZE:
                 return None
@@ -73,12 +81,33 @@ else:
         raise OSError("HWInfo64 shared memory is only available on Windows")
 
 
+def _parse_hardware_names(data: bytes) -> dict[int, str]:
+    """Build a map of sensor_index → hardware device name from the sensors section."""
+    vals = struct.unpack_from(_HEADER_FMT, data)
+    sensor_off, sensor_size, sensor_count = vals[4], vals[5], vals[6]
+
+    names: dict[int, str] = {}
+    for i in range(sensor_count):
+        offset = sensor_off + i * sensor_size
+        chunk = data[offset : offset + _SENSOR_MEANINGFUL]
+        if len(chunk) < _SENSOR_MEANINGFUL:
+            break
+        _sid, _sinst, name_orig, name_user = struct.unpack(_SENSOR_FMT, chunk)
+        names[i] = (
+            name_user.rstrip(b"\x00") or name_orig.rstrip(b"\x00")
+        ).decode("utf-8", errors="replace")
+
+    return names
+
+
 def parse_buffer(data: bytes) -> list[SensorReading]:
     """Parse raw shared memory bytes into sensor readings. Pure — no IO, fully testable."""
     vals = struct.unpack_from(_HEADER_FMT, data)
     entry_off, entry_size, entry_count = vals[7], vals[8], vals[9]
 
-    sensors: list[SensorReading] = []
+    hw_names = _parse_hardware_names(data)
+
+    readings: list[SensorReading] = []
     for i in range(entry_count):
         offset = entry_off + i * entry_size
         chunk = data[offset : offset + _ENTRY_MEANINGFUL]
@@ -90,11 +119,15 @@ def parse_buffer(data: bytes) -> list[SensorReading]:
         )
 
         # Prefer user-customized name; fall back to original hardware name
-        name = (
+        entry_name = (
             name_user.rstrip(b"\x00") or name_orig.rstrip(b"\x00")
         ).decode("utf-8", errors="replace")
 
-        sensors.append(
+        # Prefix with hardware device name (e.g., "AMD Radeon RX 9070 XT: GPU Temperature")
+        hw_name = hw_names.get(s_idx, "")
+        name = f"{hw_name}: {entry_name}" if hw_name else entry_name
+
+        readings.append(
             SensorReading(
                 id=s_id,
                 sensor_index=s_idx,
@@ -108,7 +141,7 @@ def parse_buffer(data: bytes) -> list[SensorReading]:
             )
         )
 
-    return sensors
+    return readings
 
 
 def read_sensors() -> Optional[list[SensorReading]]:
