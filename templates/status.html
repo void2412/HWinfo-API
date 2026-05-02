@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if not online %}<meta http-equiv="refresh" content="5">{% endif %}
+  <title>HWInfo API</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #111;
+      color: #ccc;
+      padding: 24px 28px;
+      font-size: 13px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #222;
+    }
+    h1 { font-size: 1.1rem; font-weight: 600; color: #eee; }
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    .online  { background: #0d2b1a; color: #4ade80; }
+    .offline { background: #2b0d0d; color: #f87171; }
+    .section { margin-bottom: 28px; }
+    .section-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #555;
+      margin-bottom: 6px;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #444;
+      padding: 4px 10px;
+      text-align: left;
+    }
+    td { padding: 4px 10px; border-top: 1px solid #1b1b1b; }
+    tr:hover td { background: #171717; }
+    .n { color: #d1d5db; }
+    .v { font-variant-numeric: tabular-nums; color: #7dd3fc; }
+    .u { color: #555; }
+    /* offline */
+    .err {
+      max-width: 420px;
+      margin: 80px auto;
+      text-align: center;
+    }
+    .err-title { font-size: 1rem; color: #f87171; font-weight: 600; margin-bottom: 10px; }
+    .err-msg { color: #666; line-height: 1.7; }
+    .err-msg strong { color: #999; }
+    .err-note { color: #333; font-size: 0.75rem; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HWInfo Sensor API</h1>
+    {% if online %}
+    <span class="badge online">● Online</span>
+    <span id="last-update" style="font-size:0.7rem;color:#444;margin-left:4px;"></span>
+    {% else %}
+    <span class="badge offline">● Offline</span>
+    {% endif %}
+  </header>
+
+  {% if online %}
+    {% for type_name, sensors in grouped.items() %}
+    <div class="section">
+      <div class="section-title">{{ type_name }}</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Sensor</th>
+            <th>Now</th><th>Min</th><th>Max</th><th>Avg</th>
+            <th>Unit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sensors %}
+          <tr>
+            <td class="n">{{ s.name }}</td>
+            <td class="v">{{ "%.2f"|format(s.value) }}</td>
+            <td class="v">{{ "%.2f"|format(s.value_min) }}</td>
+            <td class="v">{{ "%.2f"|format(s.value_max) }}</td>
+            <td class="v">{{ "%.2f"|format(s.value_avg) }}</td>
+            <td class="u">{{ s.unit }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="err">
+    <div class="err-title">HWInfo64 is not running</div>
+    <p class="err-msg">
+      Start <strong>HWInfo64</strong> and enable<br>
+      <strong>Settings → General → Shared Memory Support</strong>,<br>
+      then this page will update automatically.
+    </p>
+    <p class="err-note">Auto-refreshing every 5 seconds…</p>
+  </div>
+  {% endif %}
+
+  {% if online %}
+  <script>
+    const INTERVAL = 2000;
+
+    function fmt(v) { return Number(v).toFixed(2); }
+
+    function renderSections(grouped) {
+      const container = document.querySelector('body');
+      // Remove existing sections
+      document.querySelectorAll('.section').forEach(el => el.remove());
+
+      const header = document.querySelector('header');
+      for (const [typeName, sensors] of Object.entries(grouped)) {
+        const section = document.createElement('div');
+        section.className = 'section';
+        section.innerHTML = `
+          <div class="section-title">${typeName}</div>
+          <table>
+            <thead><tr>
+              <th>Sensor</th>
+              <th>Now</th><th>Min</th><th>Max</th><th>Avg</th>
+              <th>Unit</th>
+            </tr></thead>
+            <tbody>${sensors.map(s => `
+              <tr>
+                <td class="n">${s.name}</td>
+                <td class="v">${fmt(s.value)}</td>
+                <td class="v">${fmt(s.value_min)}</td>
+                <td class="v">${fmt(s.value_max)}</td>
+                <td class="v">${fmt(s.value_avg)}</td>
+                <td class="u">${s.unit}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>`;
+        container.appendChild(section);
+      }
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch('/api/sensors');
+        if (!res.ok) { location.reload(); return; }
+        const sensors = await res.json();
+
+        const grouped = {};
+        for (const s of sensors) {
+          (grouped[s.type] = grouped[s.type] || []).push(s);
+        }
+        renderSections(grouped);
+
+        const ts = new Date().toLocaleTimeString();
+        document.getElementById('last-update').textContent = `updated ${ts}`;
+      } catch {
+        location.reload();
+      }
+    }
+
+    setInterval(poll, INTERVAL);
+  </script>
+  {% endif %}
+</body>
+</html>

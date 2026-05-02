@@ -66,6 +66,10 @@ docs/research/*
 logs.txt
 test-ck
 __pycache__
+.venv/
+logs/
+.pytest_cache/
+*.pyc
 
 # CK meta commands
 prompt.md
@@ -78,3 +82,5 @@ ck.md
 .opencode/
 AGENTS.md
 CLAUDE.md
+plans/
+nssm.exe
